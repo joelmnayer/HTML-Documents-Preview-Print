@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HTML Preview & Print</title>
+
+    <!-- CodeMirror Library from CDN -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/theme/dracula.min.css">
+
+    <style>
+        /* --- Main UI Styles --- */
+        :root {
+            --header-height: 60px;
+            --controls-height: 50px;
+            --dark-bg: #2C3E50;
+            --editor-bg: #282a36;
+            --light-bg: #EAEAEA;
+            --divider-color: #444;
+            --accent-green: #27AE60;
+            --accent-blue: #3498DB;
+            --accent-red: #E74C3C;
+            --accent-grey: #7F8C8D;
+            --white-text: #ECF0F1;
+        }
+        
+        * { box-sizing: border-box; }
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            overflow: hidden;
+            background-color: #333;
+        }
+
+        /* --- Layout Sections --- */
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0 20px;
+            height: var(--header-height);
+            background-color: var(--dark-bg);
+            color: var(--white-text);
+            flex-shrink: 0;
+        }
+
+        .controls-bar {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 0 20px;
+            height: var(--controls-height);
+            background-color: #34495E;
+            color: var(--white-text);
+            flex-shrink: 0;
+            flex-wrap: wrap;
+        }
+
+        .main-container {
+            display: flex;
+            flex-grow: 1;
+            height: calc(100vh - var(--header-height) - var(--controls-height));
+        }
+
+        .editor-panel {
+            flex: 1 1 50%;
+            display: flex;
+            flex-direction: column;
+            background-color: var(--editor-bg);
+            min-width: 300px;
+        }
+
+        .preview-panel {
+            flex: 1 1 50%;
+            background-color: var(--light-bg);
+            min-width: 300px;
+            /* The iframe will fill this panel */
+            display: flex;
+        }
+        
+        .editor-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 10px;
+            background-color: #343746;
+            flex-shrink: 0;
+        }
+        
+        .editor-title {
+            font-weight: 500;
+            color: #ccc;
+            font-size: 0.9rem;
+        }
+        
+        .editor-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        /* --- UI Elements --- */
+        .header-title {
+            font-size: 1.2rem;
+            font-weight: 500;
+        }
+
+        .control-group { display: flex; align-items: center; gap: 8px; }
+        .control-group label { font-size: 0.9rem; font-weight: 500; }
+        .control-group select, .control-group input {
+            background-color: #4A6572;
+            color: var(--white-text);
+            border: 1px solid #777;
+            border-radius: 4px;
+            padding: 5px 8px;
+        }
+        .control-group input[type="number"] { width: 60px; }
+
+        .action-button {
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            color: white;
+        }
+        
+        #export-btn { background-color: var(--accent-green); }
+        #export-btn:hover { background-color: #2ECC71; }
+        
+        .editor-action-btn { padding: 5px 15px; }
+        
+        #upload-btn { background-color: var(--accent-blue); }
+        #upload-btn:hover { background-color: #5DADE2; }
+        
+        #copy-btn { background-color: var(--accent-grey); }
+        #copy-btn:hover { background-color: #95A5A6; }
+        
+        #clear-btn { background-color: var(--accent-red); }
+        #clear-btn:hover { background-color: #F1948A; }
+
+        #apply-styles-btn {
+            margin-left: auto;
+            background-color: var(--accent-blue);
+        }
+        #apply-styles-btn:hover { background-color: #5DADE2; }
+
+
+        #file-input { display: none; }
+
+        .resizer {
+            flex: 0 0 5px;
+            background-color: var(--divider-color);
+            cursor: col-resize;
+            transition: background-color 0.2s ease;
+        }
+        .resizer:hover { background-color: #555; }
+
+        #preview-iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+            background-color: #fff;
+        }
+        
+        .hidden { display: none !important; }
+
+        .CodeMirror {
+            font-family: 'Fira Code', 'Source Code Pro', monospace;
+            font-size: 14px;
+            height: 100%;
+            flex-grow: 1;
+        }
+        
+        body.is-resizing {
+            user-select: none;
+            -webkit-user-select: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <header class="header">
+            <h1 class="header-title">HTML Preview & Print</h1>
+            <button id="export-btn" class="action-button">Print / Save as PDF</button>
+        </header>
+
+        <div class="controls-bar">
+            <div class="control-group">
+                <label for="page-size-select">Size:</label>
+                <select id="page-size-select">
+                    <option value="letter" selected>Letter (8.5 x 11 in)</option>
+                    <option value="legal">Legal (8.5 x 14 in)</option>
+                    <option value="tabloid">Tabloid (11 x 17 in)</option>
+                    <option value="a4">A4 (210 x 297 mm)</option>
+                    <option value="custom">Custom</option>
+                </select>
+            </div>
+            <div id="custom-size-group" class="control-group hidden">
+                <input type="number" id="custom-width" value="8.5" step="0.1" min="0">
+                <label>x</label>
+                <input type="number" id="custom-height" value="11" step="0.1" min="0">
+                <label>in</label>
+            </div>
+            <div class="control-group">
+                <label for="orientation-select">Orientation:</label>
+                <select id="orientation-select">
+                    <option value="portrait" selected>Portrait</option>
+                    <option value="landscape">Landscape</option>
+                </select>
+            </div>
+            <div class="control-group">
+                <label for="margin-preset-select">Margins:</label>
+                <select id="margin-preset-select">
+                    <option value="normal" selected>Normal (0.75")</option>
+                    <option value="slim">Slim (0.4")</option>
+                    <option value="wide">Wide (1.25")</option>
+                    <option value="none">No Margin</option>
+                    <option value="custom">Custom</option>
+                </select>
+            </div>
+            <div id="custom-margins-group" class="control-group hidden">
+                <input type="number" id="margin-top" value="0.75" step="0.1" min="0">
+                <input type="number" id="margin-right" value="0.75" step="0.1" min="0">
+                <input type="number" id="margin-bottom" value="0.75" step="0.1" min="0">
+                <input type="number" id="margin-left" value="0.75" step="0.1" min="0">
+                <label>in</label>
+            </div>
+            <button id="apply-styles-btn" class="action-button">Apply Page Settings</button>
+        </div>
+
+        <main class="main-container">
+            <div id="editor-panel" class="editor-panel">
+                <div class="editor-header">
+                    <span class="editor-title">HTML Editor</span>
+                    <div class="editor-actions">
+                        <button id="copy-btn" class="action-button editor-action-btn">Copy</button>
+                        <button id="upload-btn" class="action-button editor-action-btn">Upload (.txt, .html)</button>
+                        <button id="clear-btn" class="action-button editor-action-btn">Clear</button>
+                    </div>
+                    <input type="file" id="file-input" accept=".html,.txt,.htm">
+                </div>
+                <textarea id="code-editor"></textarea>
+            </div>
+            <div id="resizer" class="resizer"></div>
+            <div class="preview-panel">
+                <iframe id="preview-iframe" sandbox="allow-scripts allow-same-origin allow-modals"></iframe>
+            </div>
+        </main>
+    </div>
+
+    <!-- Libraries from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/xml/xml.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/mode/htmlmixed/htmlmixed.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.15/addon/edit/closetag.min.js"></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // --- Constants & State ---
+            const PAGE_SIZES = {
+                letter: { width: 8.5, height: 11 },
+                legal: { width: 8.5, height: 14 },
+                tabloid: { width: 11, height: 17 },
+                a4: { width: 8.27, height: 11.69 }
+            };
+            const MARGIN_PRESETS = {
+                normal: 0.75,
+                slim: 0.4,
+                wide: 1.25,
+                none: 0
+            };
+            let isSyncing = false;
+            let mutationObserver = null;
+
+            // --- DOM References ---
+            const editorPanel = document.getElementById('editor-panel');
+            const previewIframe = document.getElementById('preview-iframe');
+            const resizer = document.getElementById('resizer');
+            const exportBtn = document.getElementById('export-btn');
+            const uploadBtn = document.getElementById('upload-btn');
+            const copyBtn = document.getElementById('copy-btn');
+            const clearBtn = document.getElementById('clear-btn');
+            const fileInput = document.getElementById('file-input');
+            const applyStylesBtn = document.getElementById('apply-styles-btn');
+            // Control inputs
+            const pageSizeSelect = document.getElementById('page-size-select');
+            const customSizeGroup = document.getElementById('custom-size-group');
+            const customWidthInput = document.getElementById('custom-width');
+            const customHeightInput = document.getElementById('custom-height');
+            const orientationSelect = document.getElementById('orientation-select');
+            const marginPresetSelect = document.getElementById('margin-preset-select');
+            const customMarginsGroup = document.getElementById('custom-margins-group');
+            const marginTopInput = document.getElementById('margin-top');
+            const marginRightInput = document.getElementById('margin-right');
+            const marginBottomInput = document.getElementById('margin-bottom');
+            const marginLeftInput = document.getElementById('margin-left');
+
+            // --- CodeMirror Initialization ---
+            const editor = CodeMirror.fromTextArea(document.getElementById('code-editor'), {
+                lineNumbers: true,
+                mode: 'htmlmixed',
+                theme: 'dracula',
+                autoCloseTags: true,
+                tabSize: 2
+            });
+            editor.setValue(`<h1>Welcome to HTML Preview & Print!</h1>\n<p>Click here to edit me.</p>`);
+
+            // --- Debounce Utility ---
+            function debounce(func, delay) {
+                let timeout;
+                return (...args) => {
+                    clearTimeout(timeout);
+                    timeout = setTimeout(() => func.apply(this, args), delay);
+                };
+            }
+            
+            // --- Settings & Style Application ---
+            function getRenderingSettings() {
+                let pageDimensions;
+                const sizeValue = pageSizeSelect.value;
+                if (sizeValue === 'custom') {
+                    pageDimensions = {
+                        width: Math.max(0, parseFloat(customWidthInput.value) || 8.5),
+                        height: Math.max(0, parseFloat(customHeightInput.value) || 11)
+                    };
+                } else {
+                    pageDimensions = PAGE_SIZES[sizeValue];
+                }
+
+                let margins;
+                const marginValue = marginPresetSelect.value;
+                if (marginValue === 'custom') {
+                    margins = {
+                        top: Math.max(0, parseFloat(marginTopInput.value) || 0),
+                        right: Math.max(0, parseFloat(marginRightInput.value) || 0),
+                        bottom: Math.max(0, parseFloat(marginBottomInput.value) || 0),
+                        left: Math.max(0, parseFloat(marginLeftInput.value) || 0),
+                    };
+                } else {
+                    const presetMargin = MARGIN_PRESETS[marginValue];
+                    margins = { top: presetMargin, right: presetMargin, bottom: presetMargin, left: presetMargin };
+                }
+                
+                const orientation = orientationSelect.value;
+                const finalDimensions = (orientation === 'landscape') 
+                    ? { width: pageDimensions.height, height: pageDimensions.width }
+                    : { width: pageDimensions.width, height: pageDimensions.height };
+
+                return { ...finalDimensions, margins, orientation, sizeName: sizeValue };
+            }
+            
+            // --- Two-Way Sync & Iframe Update Logic ---
+            const debouncedUpdateEditor = debounce(() => {
+                if (isSyncing) return;
+                isSyncing = true;
+                const iframeCode = previewIframe.contentDocument.body.innerHTML;
+                if (editor.getValue() !== iframeCode) {
+                    editor.setValue(iframeCode);
+                }
+                isSyncing = false;
+            }, 400);
+
+            function setupMutationObserver() {
+                if (mutationObserver) mutationObserver.disconnect();
+                
+                const iframeBody = previewIframe.contentDocument.body;
+                mutationObserver = new MutationObserver(debouncedUpdateEditor);
+                mutationObserver.observe(iframeBody, {
+                    childList: true,
+                    subtree: true,
+                    characterData: true,
+                });
+            }
+
+            function updatePreview() {
+                if (isSyncing) return;
+                isSyncing = true;
+                
+                const settings = getRenderingSettings();
+                const userCode = editor.getValue();
+                
+                const printScript = `
+                    <script>
+                        window.addEventListener('message', event => {
+                            if (event.data === 'print') {
+                                window.print();
+                            }
+                        });
+                    <\/script>
+                `;
+                
+                const cssReset = `
+                    <style>
+                        *, *::before, *::after {
+                            box-sizing: border-box;
+                            margin: 0;
+                            padding: 0;
+                        }
+                    </style>
+                `;
+
+                // Construct the full HTML for the iframe
+                const fullHtml = `
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        ${cssReset}
+                        <style>
+                            @page {
+                                size: ${settings.sizeName === 'custom' ? `${settings.width}in ${settings.height}in` : settings.sizeName} ${settings.orientation};
+                                margin: ${settings.margins.top}in ${settings.margins.right}in ${settings.margins.bottom}in ${settings.margins.left}in;
+                            }
+                            body {
+                                margin: ${settings.margins.top}in ${settings.margins.right}in ${settings.margins.bottom}in ${settings.margins.left}in;
+                            }
+                        </style>
+                        ${userCode.includes('<head>') ? '' : '<meta charset="UTF-8">'}
+                    </head>
+                    <body>
+                        ${userCode}
+                        ${printScript}
+                    </body>
+                    </html>
+                `;
+                
+                // Use srcdoc to update the iframe, which creates a new document context
+                previewIframe.srcdoc = fullHtml;
+
+                // When the new document loads, make it editable and set up the observer
+                previewIframe.onload = () => {
+                    previewIframe.contentDocument.body.contentEditable = true;
+                    setupMutationObserver();
+                };
+
+                isSyncing = false;
+            }
+
+            // --- UI Event Handlers ---
+            function handleUiChange() {
+                customSizeGroup.classList.toggle('hidden', pageSizeSelect.value !== 'custom');
+                customMarginsGroup.classList.toggle('hidden', marginPresetSelect.value !== 'custom');
+            }
+
+            editor.on('change', debounce(updatePreview, 400));
+            
+            const allControls = [pageSizeSelect, orientationSelect, marginPresetSelect, customWidthInput, customHeightInput, marginTopInput, marginRightInput, marginBottomInput, marginLeftInput];
+            allControls.forEach(el => el.addEventListener('change', handleUiChange));
+            
+            applyStylesBtn.addEventListener('click', updatePreview);
+            
+            exportBtn.addEventListener('click', () => {
+                // Send a message to the iframe to trigger its print dialog
+                previewIframe.contentWindow.postMessage('print', '*');
+            });
+
+            uploadBtn.addEventListener('click', () => fileInput.click());
+            clearBtn.addEventListener('click', () => editor.setValue(''));
+            copyBtn.addEventListener('click', () => {
+                navigator.clipboard.writeText(editor.getValue()).then(() => {
+                    const originalText = copyBtn.textContent;
+                    copyBtn.textContent = 'Copied!';
+                    setTimeout(() => { copyBtn.textContent = originalText; }, 2000);
+                });
+            });
+            
+            fileInput.addEventListener('change', (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    editor.setValue(e.target.result);
+                    updatePreview(); // Update preview after loading file
+                };
+                reader.readAsText(file);
+                event.target.value = '';
+            });
+
+            // --- Resizer Logic ---
+            resizer.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                document.body.classList.add('is-resizing');
+                window.addEventListener('mousemove', handleMouseMove);
+                window.addEventListener('mouseup', handleMouseUp);
+            });
+            function handleMouseMove(e) {
+                const newFlexBasis = (e.clientX / window.innerWidth) * 100;
+                if (newFlexBasis > 15 && newFlexBasis < 85) {
+                    editorPanel.style.flexBasis = `${newFlexBasis}%`;
+                }
+            }
+            function handleMouseUp() {
+                document.body.classList.remove('is-resizing');
+                window.removeEventListener('mousemove', handleMouseMove);
+                window.removeEventListener('mouseup', handleMouseUp);
+            }
+
+            // --- Initial Setup ---
+            handleUiChange();
+            updatePreview();
+        });
+    </script>
+</body>
+</html>
